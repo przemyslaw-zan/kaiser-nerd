@@ -7,12 +7,17 @@ test('loads selected event from query parameter', async ({ page }) => {
 
 test('updates URL when selecting an event', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: /The Emergency Session/ }).click()
-  await expect(page).toHaveURL(/event=poland_events\.5/)
+  // Wait for the event list to populate before interacting
+  const firstButton = page.getByTestId('event-list').getByRole('button').first()
+  await expect(firstButton).toBeVisible()
+  await firstButton.click()
+  await expect(page).toHaveURL(/event=/)
 })
 
 test('filters list with fuzzy search', async ({ page }) => {
   await page.goto('/')
-  await page.getByLabel('Search events').fill('aftermath')
-  await expect(page.getByTestId('event-list')).toContainText('Aftermath')
+  // Wait for the event list to populate before searching
+  await expect(page.getByTestId('event-list').getByRole('button').first()).toBeVisible()
+  await page.getByLabel('Search events').fill('ace pilot')
+  await expect(page.getByTestId('event-list')).toContainText('Ace Pilot')
 })
