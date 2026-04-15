@@ -5,7 +5,7 @@
   "description": "Static docs-style browser for Kaiserreich HOI4 event data",
   "type": "module",
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=24.0.0",
     "pnpm": ">=10.22.0"
   },
   "scripts": {
