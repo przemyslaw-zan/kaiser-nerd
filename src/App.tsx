@@ -1,10 +1,32 @@
-import { useEffect, useMemo, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 
 import { loadArtifact } from '@/lib/data'
-import { searchEvents } from '@/lib/search'
 import { stripHoiFormatting } from '@/lib/text'
 import { readEventFromQuery, writeEventToQuery } from '@/lib/url-state'
 import type { DataArtifact, EventDoc } from '@/types/artifact'
+
+const PAGE_SIZE = 200
+
+type SearchWorkerRequest =
+  | {
+      type: 'init'
+      events: EventDoc[]
+    }
+  | {
+      type: 'search'
+      query: string
+      requestId: number
+    }
+
+type SearchWorkerResponse =
+  | {
+      type: 'ready'
+    }
+  | {
+      type: 'result'
+      requestId: number
+      eventIds: string[] | null
+    }
 
 function EventSummary({ event }: { event: EventDoc }) {
   const groupedReferences = useMemo(() => {
@@ -88,13 +110,34 @@ function EventSummary({ event }: { event: EventDoc }) {
 function App() {
   const [artifact, setArtifact] = useState<DataArtifact | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [inputValue, setInputValue] = useState('')
   const [query, setQuery] = useState('')
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const [filteredEventIds, setFilteredEventIds] = useState<string[] | null>(null)
+  const [isSearching, setIsSearching] = useState(false)
+  const workerRef = useRef<Worker | null>(null)
+  const workerReadyRef = useRef(false)
+  const latestRequestIdRef = useRef(0)
+  const latestQueryRef = useRef('')
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      startTransition(() => {
+        setQuery(inputValue)
+      })
+    }, 120)
+
+    return () => clearTimeout(timer)
+  }, [inputValue])
 
   useEffect(() => {
     loadArtifact()
       .then((data) => {
         setArtifact(data)
+        setFilteredEventIds(null)
+        setIsSearching(false)
         const fromUrl = readEventFromQuery(window.location.search)
         const first = data.events.at(0)?.id ?? null
         setSelectedEventId(fromUrl ?? first)
@@ -105,21 +148,109 @@ function App() {
       })
   }, [])
 
-  const filteredEvents = useMemo(() => {
+  const deferredQuery = useDeferredValue(query)
+
+  const eventById = useMemo(() => {
+    if (!artifact) {
+      return new Map<string, EventDoc>()
+    }
+
+    return new Map<string, EventDoc>(artifact.events.map((event) => [event.id, event]))
+  }, [artifact])
+
+  const allEventIds = useMemo(() => {
     if (!artifact) {
       return []
     }
 
-    return searchEvents(artifact.events, query)
-  }, [artifact, query])
+    return artifact.events.map((event) => event.id)
+  }, [artifact])
+
+  useEffect(() => {
+    if (!artifact) {
+      return
+    }
+
+    const worker = new Worker(new URL('./workers/event-search.worker.ts', import.meta.url), {
+      type: 'module',
+    })
+
+    workerRef.current = worker
+    workerReadyRef.current = false
+    latestRequestIdRef.current = 0
+
+    worker.onmessage = (message: MessageEvent<SearchWorkerResponse>) => {
+      if (message.data.type === 'ready') {
+        workerReadyRef.current = true
+
+        const requestId = latestRequestIdRef.current + 1
+        latestRequestIdRef.current = requestId
+        const initialSearchMessage: SearchWorkerRequest = {
+          type: 'search',
+          query: latestQueryRef.current,
+          requestId,
+        }
+        worker.postMessage(initialSearchMessage)
+        return
+      }
+
+      if (message.data.requestId !== latestRequestIdRef.current) {
+        return
+      }
+
+      setFilteredEventIds(message.data.eventIds)
+      setIsSearching(false)
+    }
+
+    const initMessage: SearchWorkerRequest = {
+      type: 'init',
+      events: artifact.events,
+    }
+    worker.postMessage(initMessage)
+
+    return () => {
+      workerRef.current = null
+      worker.terminate()
+    }
+  }, [artifact])
+
+  useEffect(() => {
+    latestQueryRef.current = deferredQuery
+
+    if (!workerReadyRef.current || !workerRef.current) {
+      return
+    }
+
+    const requestId = latestRequestIdRef.current + 1
+    latestRequestIdRef.current = requestId
+
+    const searchMessage: SearchWorkerRequest = {
+      type: 'search',
+      query: deferredQuery,
+      requestId,
+    }
+    workerRef.current.postMessage(searchMessage)
+  }, [deferredQuery])
+
+  const filteredIds = useMemo(() => {
+    return filteredEventIds ?? allEventIds
+  }, [allEventIds, filteredEventIds])
+
+  const visibleEventIds = useMemo(() => {
+    return filteredIds.slice(0, visibleCount)
+  }, [filteredIds, visibleCount])
+
+  const visibleEvents = useMemo(() => {
+    return visibleEventIds.map((eventId) => eventById.get(eventId)).filter((event): event is EventDoc => event !== undefined)
+  }, [eventById, visibleEventIds])
 
   const selectedEvent = useMemo(() => {
-    if (!artifact || !selectedEventId) {
+    if (!selectedEventId) {
       return null
     }
 
-    return artifact.events.find((event) => event.id === selectedEventId) ?? null
-  }, [artifact, selectedEventId])
+    return eventById.get(selectedEventId) ?? null
+  }, [eventById, selectedEventId])
 
   const onSelectEvent = (eventId: string): void => {
     setSelectedEventId(eventId)
@@ -148,26 +279,50 @@ function App() {
         </label>
         <input
           id="event-search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          value={inputValue}
+          onChange={(event) => {
+            setIsSearching(true)
+            setFilteredEventIds([])
+            setInputValue(event.target.value)
+            setVisibleCount(PAGE_SIZE)
+          }}
           placeholder="Type event title or id"
           autoComplete="off"
         />
 
+        <p className="meta">
+          Showing {String(visibleEvents.length)} of {String(filteredIds.length)} matches
+          {isSearching ? ' (searching...)' : ''}
+        </p>
+
         <ul className="event-list" data-testid="event-list">
-          {filteredEvents.map((event) => (
-            <li key={event.id}>
-              <button
-                type="button"
-                className={event.id === selectedEvent?.id ? 'event-link active' : 'event-link'}
-                onClick={() => onSelectEvent(event.id)}
-              >
-                <strong>{event.title ?? event.id}</strong>
-                <span>{event.id}</span>
-              </button>
-            </li>
-          ))}
+          {isSearching ? <li className="meta">Searching…</li> : null}
+          {!isSearching && visibleEvents.length === 0 ? <li className="meta">No matching events.</li> : null}
+          {!isSearching
+            ? visibleEvents.map((event) => (
+                <li key={event.id}>
+                  <button
+                    type="button"
+                    className={event.id === selectedEvent?.id ? 'event-link active' : 'event-link'}
+                    onClick={() => onSelectEvent(event.id)}
+                  >
+                    <strong>{event.title ?? event.id}</strong>
+                    <span>{event.id}</span>
+                  </button>
+                </li>
+              ))
+            : null}
         </ul>
+
+        {filteredIds.length > visibleEvents.length ? (
+          <button
+            type="button"
+            className="event-link"
+            onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
+          >
+            Load more events
+          </button>
+        ) : null}
       </aside>
 
       <section className="panel panel-right">

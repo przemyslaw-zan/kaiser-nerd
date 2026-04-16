@@ -25,12 +25,16 @@ export function createEventSearch(events: EventDoc[]): Fuse<SearchRow> {
   })
 }
 
-export function searchEvents(events: EventDoc[], query: string): EventDoc[] {
+export function searchEventsWithIndex(search: Fuse<SearchRow>, events: EventDoc[], query: string): EventDoc[] {
   const trimmed = query.trim()
   if (!trimmed) {
     return events
   }
 
+  return search.search(trimmed).map((row) => row.item.event)
+}
+
+export function searchEvents(events: EventDoc[], query: string): EventDoc[] {
   const fuse = createEventSearch(events)
-  return fuse.search(trimmed).map((row) => row.item.event)
+  return searchEventsWithIndex(fuse, events, query)
 }
