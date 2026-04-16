@@ -53,6 +53,127 @@ country_event = {
     expect(eventRef?.delayDays).toBe(2)
   })
 
+  it('keeps immediate and option scopes separate', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kr-parser-'))
+    tempDirs.push(tempDir)
+
+    const filePath = path.join(tempDir, 'scope-test.txt')
+    const content = `
+country_event = {
+  id = test_events.1
+  title = test_events.1.t
+  desc = test_events.1.d
+
+  immediate = {
+    add_stability = 0.05
+    country_event = { id = test_events.2 days = 4 }
+  }
+
+  option = {
+    name = test_events.1.a
+    add_political_power = 25
+    country_event = test_events.3
+  }
+}
+`
+
+    await fs.writeFile(filePath, content, 'utf8')
+
+    const localization = new Map<string, string>([
+      ['test_events.1.t', 'Test Event'],
+      ['test_events.1.d', 'Description'],
+      ['test_events.1.a', 'Choose option'],
+    ])
+
+    const parsed = await parseEventFile(filePath, localization, new Set<string>(), tempDir)
+    expect(parsed).toHaveLength(1)
+
+    const first = parsed[0]
+    expect(first.immediateEffects).toContain('add_stability')
+    expect(first.immediateEffects).not.toContain('add_political_power')
+
+    expect(first.options[0]?.effects).toContain('add_political_power')
+
+    const immediateRef = first.references.find((ref) => ref.targetId === 'test_events.2')
+    expect(immediateRef?.via).toBe('immediate')
+
+    const optionRef = first.references.find((ref) => ref.targetId === 'test_events.3')
+    expect(optionRef?.via).toBe('option')
+  })
+
+  it('does not include trigger keys as immediate effects', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kr-parser-'))
+    tempDirs.push(tempDir)
+
+    const filePath = path.join(tempDir, 'trigger-scope-test.txt')
+    const content = `
+country_event = {
+  id = germany_easter_egg_events.1
+  title = germany_easter_egg_events.1.t
+  desc = germany_easter_egg_events.1.d
+
+  immediate = {
+    if = {
+      limit = {
+        GER_is_schleicher_path = yes
+      }
+      set_country_flag = GER_path_checked
+    }
+  }
+}
+`
+
+    await fs.writeFile(filePath, content, 'utf8')
+
+    const localization = new Map<string, string>([
+      ['germany_easter_egg_events.1.t', 'Test Event'],
+      ['germany_easter_egg_events.1.d', 'Description'],
+    ])
+
+    const parsed = await parseEventFile(filePath, localization, new Set<string>(), tempDir)
+    expect(parsed).toHaveLength(1)
+
+    const first = parsed[0]
+    expect(first.immediateEffects).toContain('set_country_flag')
+    expect(first.immediateEffects).not.toContain('GER_is_schleicher_path')
+  })
+
+  it('does not include top-level trigger keys as immediate effects', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kr-parser-'))
+    tempDirs.push(tempDir)
+
+    const filePath = path.join(tempDir, 'root-trigger-scope-test.txt')
+    const content = `
+country_event = {
+  id = germany_easter_egg_events.1
+  title = germany_easter_egg_events.1.t
+  desc = germany_easter_egg_events.1.d
+
+  trigger = {
+    GER_is_schleicher_path = yes
+  }
+
+  immediate = {
+    set_country_flag = GER_path_checked
+  }
+}
+`
+
+    await fs.writeFile(filePath, content, 'utf8')
+
+    const localization = new Map<string, string>([
+      ['germany_easter_egg_events.1.t', 'Test Event'],
+      ['germany_easter_egg_events.1.d', 'Description'],
+    ])
+
+    const parsed = await parseEventFile(filePath, localization, new Set<string>(), tempDir)
+    expect(parsed).toHaveLength(1)
+
+    const first = parsed[0]
+    expect(first.immediateEffects).toContain('set_country_flag')
+    expect(first.immediateEffects).not.toContain('GER_is_schleicher_path')
+  })
+
   it('builds incoming event links', () => {
     const items = buildIncomingEventLinks([
       {
