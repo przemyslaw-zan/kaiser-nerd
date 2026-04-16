@@ -173,6 +173,25 @@ ul {
   background: #fff;
 }
 
+.effect-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.effect-list .effect-list {
+  margin-top: 6px;
+  padding-left: 18px;
+}
+
+.effect-key {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  color: var(--ink-900);
+}
+
+.effect-values {
+  color: var(--ink-700);
+}
+
 .reference-group {
   margin-top: 8px;
 }

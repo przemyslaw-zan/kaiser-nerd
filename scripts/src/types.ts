@@ -10,7 +10,14 @@ export interface EventOption {
   nameKey?: string
   name?: string
   effects: string[]
+  effectTree?: EventEffectNode[]
   references: EventReference[]
+}
+
+export interface EventEffectNode {
+  key: string
+  value?: string
+  children?: EventEffectNode[]
 }
 
 export interface EventDoc {

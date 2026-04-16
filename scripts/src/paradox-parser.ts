@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-import type { EventDoc, EventOption, EventReference } from './types.js'
+import type { EventDoc, EventEffectNode, EventOption, EventReference } from './types.js'
 
 const EVENT_KEYS = new Set(['country_event', 'news_event', 'state_event'])
 const FOCUS_REFERENCE_KEYS = new Set([
@@ -16,6 +16,7 @@ const SKIP_EFFECT_KEYS = new Set([
   'title',
   'desc',
   'name',
+  'log',
   'option',
   'trigger',
   'ai_chance',
@@ -303,6 +304,30 @@ function collectEffectsFromBlock(
   return effects
 }
 
+function buildEffectNode(assignment: ClausewitzAssignment): EventEffectNode {
+  if (assignment.value.kind === 'scalar') {
+    return {
+      key: assignment.key,
+      value: assignment.value.raw,
+    }
+  }
+
+  const children = assignment.value.assignments
+    .filter((childAssignment) => !SKIP_EFFECT_KEYS.has(childAssignment.key))
+    .map((childAssignment) => buildEffectNode(childAssignment))
+
+  return {
+    key: assignment.key,
+    children: children.length > 0 ? children : undefined,
+  }
+}
+
+function buildOptionEffectTree(optionBlock: ClausewitzBlock): EventEffectNode[] {
+  return optionBlock.assignments
+    .filter((assignment) => !SKIP_EFFECT_KEYS.has(assignment.key))
+    .map((assignment) => buildEffectNode(assignment))
+}
+
 function dedupeReferences(references: EventReference[]): EventReference[] {
   const byKey = new Map<string, EventReference>()
 
@@ -445,12 +470,15 @@ function parseOption(
   scriptedEffectNames: Set<string>,
 ): EventOption {
   const nameKey = getScalarAssignment(optionBlock, 'name')
+  const effects = Array.from(collectEffectsFromBlock(optionBlock)).sort((a, b) => a.localeCompare(b))
+  const effectTree = buildOptionEffectTree(optionBlock)
 
   return {
     index,
     nameKey,
     name: nameKey ? localization.get(nameKey) : undefined,
-    effects: Array.from(collectEffectsFromBlock(optionBlock)).sort((a, b) => a.localeCompare(b)),
+    effects,
+    effectTree,
     references: extractReferencesFromBlock(optionBlock, 'option', scriptedEffectNames),
   }
 }

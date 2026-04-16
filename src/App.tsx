@@ -3,7 +3,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 import { loadArtifact } from '@/lib/data'
 import { stripHoiFormatting } from '@/lib/text'
 import { readEventFromQuery, writeEventToQuery } from '@/lib/url-state'
-import type { DataArtifact, EventDoc } from '@/types/artifact'
+import type { DataArtifact, EventDoc, EventEffectNode } from '@/types/artifact'
 
 const PAGE_SIZE = 200
 
@@ -27,6 +27,20 @@ type SearchWorkerResponse =
       requestId: number
       eventIds: string[] | null
     }
+
+function OptionEffectTree({ nodes }: { nodes: EventEffectNode[] }) {
+  return (
+    <ul className="effect-list">
+      {nodes.map((node, index) => (
+        <li key={`${node.key}-${node.value ?? ''}-${String(index)}`}>
+          <span className="effect-key">{node.key}</span>
+          {node.value ? <span className="effect-values"> = {node.value}</span> : null}
+          {node.children && node.children.length > 0 ? <OptionEffectTree nodes={node.children} /> : null}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 function EventSummary({ event }: { event: EventDoc }) {
   const groupedReferences = useMemo(() => {
@@ -70,7 +84,19 @@ function EventSummary({ event }: { event: EventDoc }) {
           event.options.map((option) => (
             <div key={`${event.id}-${option.index}`} className="option-card">
               <h4>{option.name ?? option.nameKey ?? `Option ${String(option.index + 1)}`}</h4>
-              <p className="meta">Effects: {option.effects.join(', ') || 'None parsed.'}</p>
+              {option.effectTree && option.effectTree.length > 0 ? (
+                <OptionEffectTree nodes={option.effectTree} />
+              ) : option.effects.length > 0 ? (
+                <ul className="effect-list">
+                  {option.effects.map((effect) => (
+                    <li key={`${event.id}-${option.index}-${effect}`}>
+                      <span className="effect-key">{effect}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="meta">No effects parsed.</p>
+              )}
             </div>
           ))
         ) : (

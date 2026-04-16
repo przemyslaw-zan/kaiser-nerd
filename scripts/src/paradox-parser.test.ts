@@ -93,6 +93,10 @@ country_event = {
     expect(first.immediateEffects).not.toContain('add_political_power')
 
     expect(first.options[0]?.effects).toContain('add_political_power')
+    const powerNode = first.options[0]?.effectTree?.find((entry) => entry.key === 'add_political_power')
+    expect(powerNode?.value).toBe('25')
+    const eventNode = first.options[0]?.effectTree?.find((entry) => entry.key === 'country_event')
+    expect(eventNode?.value).toBe('test_events.3')
 
     const immediateRef = first.references.find((ref) => ref.targetId === 'test_events.2')
     expect(immediateRef?.via).toBe('immediate')
@@ -172,6 +176,44 @@ country_event = {
     const first = parsed[0]
     expect(first.immediateEffects).toContain('set_country_flag')
     expect(first.immediateEffects).not.toContain('GER_is_schleicher_path')
+  })
+
+  it('parses nested option effect objects recursively', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kr-parser-'))
+    tempDirs.push(tempDir)
+
+    const filePath = path.join(tempDir, 'nested-effect-tree-test.txt')
+    const content = `
+country_event = {
+  id = nested_events.1
+  title = nested_events.1.t
+  desc = nested_events.1.d
+
+  option = {
+    name = nested_events.1.a
+    add_popularity = {
+      ideology = social_democrat
+      popularity = 0.05
+    }
+  }
+}
+`
+
+    await fs.writeFile(filePath, content, 'utf8')
+
+    const localization = new Map<string, string>([
+      ['nested_events.1.t', 'Nested Event'],
+      ['nested_events.1.d', 'Description'],
+      ['nested_events.1.a', 'Option A'],
+    ])
+
+    const parsed = await parseEventFile(filePath, localization, new Set<string>(), tempDir)
+    expect(parsed).toHaveLength(1)
+
+    const popularityNode = parsed[0]?.options[0]?.effectTree?.find((entry) => entry.key === 'add_popularity')
+    expect(popularityNode).toBeDefined()
+    expect(popularityNode?.children?.find((entry) => entry.key === 'ideology')?.value).toBe('social_democrat')
+    expect(popularityNode?.children?.find((entry) => entry.key === 'popularity')?.value).toBe('0.05')
   })
 
   it('builds incoming event links', () => {

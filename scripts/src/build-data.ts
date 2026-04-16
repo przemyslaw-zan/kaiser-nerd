@@ -43,6 +43,7 @@ function sortArtifact(artifact: DataArtifact): DataArtifact {
       options: event.options.map((option) => ({
         ...option,
         effects: [...option.effects].sort((a, b) => a.localeCompare(b)),
+        effectTree: option.effectTree,
         references: [...option.references].sort((a, b) => a.targetId.localeCompare(b.targetId)),
       })),
     }))
