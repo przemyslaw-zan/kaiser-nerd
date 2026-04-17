@@ -5,6 +5,7 @@ Artifact files:
 - public/data/event-details.json
 - public/data/focus-details.json
 - public/data/decision-details.json
+- public/data/idea-details.json
 
 Budget policy:
 - Warning at 50MB.
@@ -21,6 +22,7 @@ Detail files contain bulk payloads:
 - event-details.json: descriptions, immediate effects, option effect trees, references, incoming links.
 - focus-details.json: descriptions, prerequisites, completion effects/trees, references.
 - decision-details.json: descriptions, properties, effects/trees, references.
+- idea-details.json: descriptions, properties, effects/trees, references.
 
 Event fields:
 - id, namespace, sourceFile.

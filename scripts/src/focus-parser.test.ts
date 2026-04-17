@@ -31,6 +31,7 @@ focus_tree = {
       add_stability = 0.05
       country_event = { id = palestine_events.1 days = 2 }
       complete_national_focus = PAL_follow_up
+      add_ideas = PAL_city_administration
     }
   }
 }
@@ -60,6 +61,9 @@ focus_tree = {
 
     const focusRef = parsed[0]?.references.find((ref) => ref.type === 'focus')
     expect(focusRef?.targetId).toBe('PAL_follow_up')
+
+    const ideaRef = parsed[0]?.references.find((ref) => ref.type === 'idea')
+    expect(ideaRef?.targetId).toBe('PAL_city_administration')
   })
 
   it('parses prerequisite blocks as OR groups and AND across groups', async () => {

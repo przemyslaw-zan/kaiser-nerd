@@ -1,5 +1,5 @@
 export interface EventReference {
-  type: 'event' | 'focus' | 'decision' | 'scripted_effect'
+  type: 'event' | 'focus' | 'decision' | 'idea' | 'scripted_effect'
   targetId: string
   delayDays?: number
   via: 'immediate' | 'option' | 'body'
@@ -64,6 +64,20 @@ export interface DecisionDoc {
   references: EventReference[]
 }
 
+export interface IdeaDoc {
+  id: string
+  categoryId: string
+  sourceFile: string
+  titleKey?: string
+  descKey?: string
+  title?: string
+  description?: string
+  properties?: Record<string, string>
+  effects: string[]
+  effectTree?: EventEffectNode[]
+  references: EventReference[]
+}
+
 export interface DataArtifact {
   version: string
   generatedAt: string
@@ -71,10 +85,12 @@ export interface DataArtifact {
     events: number
     focuses: number
     decisions: number
+    ideas: number
     localizationEntries: number
     references: number
   }
   events: EventDoc[]
   focuses: FocusDoc[]
   decisions: DecisionDoc[]
+  ideas: IdeaDoc[]
 }

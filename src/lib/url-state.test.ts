@@ -29,6 +29,15 @@ describe('url-state', () => {
     })
   })
 
+  it('reads idea selection when all keys are present', () => {
+    expect(
+      readSelectionFromQuery('?event=poland_events.5&focus=POL_emergency&decision=ENG_war_cabinet&idea=BUK_reform'),
+    ).toEqual({
+      kind: 'idea',
+      id: 'BUK_reform',
+    })
+  })
+
   it('writes focus selection and clears event key', () => {
     expect(writeSelectionToQuery('?foo=bar&event=poland_events.5', { kind: 'focus', id: 'POL_emergency' })).toBe(
       '?foo=bar&focus=POL_emergency',
@@ -42,5 +51,14 @@ describe('url-state', () => {
         id: 'ENG_war_cabinet',
       }),
     ).toBe('?foo=bar&decision=ENG_war_cabinet')
+  })
+
+  it('writes idea selection and clears event/focus/decision keys', () => {
+    expect(
+      writeSelectionToQuery('?foo=bar&event=poland_events.5&focus=POL_emergency&decision=ENG_war_cabinet', {
+        kind: 'idea',
+        id: 'BUK_reform',
+      }),
+    ).toBe('?foo=bar&idea=BUK_reform')
   })
 })

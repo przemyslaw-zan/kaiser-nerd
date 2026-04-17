@@ -15,6 +15,7 @@ import {
 import { parseDecisionFile } from './decision-parser.js'
 import { parseNationalFocusFile } from './focus-parser.js'
 import { getFilesRecursive } from './fs-utils.js'
+import { parseIdeaFile } from './idea-parser.js'
 import { parseLocalizationFiles } from './localization.js'
 import { buildIncomingEventLinks, collectScriptedEffectNames, parseEventFile } from './paradox-parser.js'
 import type { DataArtifact } from './types.js'
@@ -97,11 +98,30 @@ function sortArtifact(artifact: DataArtifact): DataArtifact {
     }))
     .sort((a, b) => a.id.localeCompare(b.id))
 
+  const sortedIdeas = artifact.ideas
+    .map((idea) => ({
+      ...idea,
+      effects: [...idea.effects].sort((a, b) => a.localeCompare(b)),
+      references: [...idea.references].sort((a, b) => {
+        const byType = a.type.localeCompare(b.type)
+        if (byType !== 0) {
+          return byType
+        }
+        const byId = a.targetId.localeCompare(b.targetId)
+        if (byId !== 0) {
+          return byId
+        }
+        return (a.delayDays ?? -1) - (b.delayDays ?? -1)
+      }),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+
   return {
     ...artifact,
     events: sortedEvents,
     focuses: sortedFocuses,
     decisions: sortedDecisions,
+    ideas: sortedIdeas,
   }
 }
 
@@ -109,13 +129,15 @@ export async function buildArtifactFromPath(sourcePath: string): Promise<DataArt
   const eventsDir = path.join(sourcePath, 'events')
   const nationalFocusesDir = path.join(sourcePath, 'common', 'national_focus')
   const decisionsDir = path.join(sourcePath, 'common', 'decisions')
+  const ideasDir = path.join(sourcePath, 'common', 'ideas')
   const localizationDir = path.join(sourcePath, 'localisation', 'english')
   const scriptedEffectsDir = path.join(sourcePath, 'common', 'scripted_effects')
 
-  const [eventFiles, focusFiles, decisionFiles, localizationFiles, scriptedEffectFiles] = await Promise.all([
+  const [eventFiles, focusFiles, decisionFiles, ideaFiles, localizationFiles, scriptedEffectFiles] = await Promise.all([
     getFilesRecursive(eventsDir, '.txt'),
     getFilesRecursive(nationalFocusesDir, '.txt').catch(() => []),
     getFilesRecursive(decisionsDir, '.txt').catch(() => []),
+    getFilesRecursive(ideasDir, '.txt').catch(() => []),
     getFilesRecursive(localizationDir, '.yml'),
     getFilesRecursive(scriptedEffectsDir, '.txt').catch(() => []),
   ])
@@ -132,14 +154,19 @@ export async function buildArtifactFromPath(sourcePath: string): Promise<DataArt
   const parsedDecisions = await Promise.all(
     decisionFiles.map((filePath) => parseDecisionFile(filePath, localization, scriptedEffectNames, sourcePath)),
   )
+  const parsedIdeas = await Promise.all(
+    ideaFiles.map((filePath) => parseIdeaFile(filePath, localization, scriptedEffectNames, sourcePath)),
+  )
 
   const eventsWithIncoming = buildIncomingEventLinks(parsedEvents.flat())
   const focusDocs = parsedFocuses.flat()
   const decisionDocs = parsedDecisions.flat()
+  const ideaDocs = parsedIdeas.flat()
   const eventReferenceCount = eventsWithIncoming.reduce((sum, event) => sum + event.references.length, 0)
   const focusReferenceCount = focusDocs.reduce((sum, focus) => sum + focus.references.length, 0)
   const decisionReferenceCount = decisionDocs.reduce((sum, decision) => sum + decision.references.length, 0)
-  const totalReferences = eventReferenceCount + focusReferenceCount + decisionReferenceCount
+  const ideaReferenceCount = ideaDocs.reduce((sum, idea) => sum + idea.references.length, 0)
+  const totalReferences = eventReferenceCount + focusReferenceCount + decisionReferenceCount + ideaReferenceCount
 
   return sortArtifact({
     version: '1',
@@ -148,12 +175,14 @@ export async function buildArtifactFromPath(sourcePath: string): Promise<DataArt
       events: eventsWithIncoming.length,
       focuses: focusDocs.length,
       decisions: decisionDocs.length,
+      ideas: ideaDocs.length,
       localizationEntries: localization.size,
       references: totalReferences,
     },
     events: eventsWithIncoming,
     focuses: focusDocs,
     decisions: decisionDocs,
+    ideas: ideaDocs,
   })
 }
 
@@ -191,7 +220,7 @@ async function main(): Promise<void> {
 
   // Keep output compact and explicit for CI logs.
   console.log(
-    `Generated ${String(artifact.events.length)} events, ${String(artifact.focuses.length)} focuses, and ${String(artifact.decisions.length)} decisions with ${String(artifact.stats.references)} references.`,
+    `Generated ${String(artifact.events.length)} events, ${String(artifact.focuses.length)} focuses, ${String(artifact.decisions.length)} decisions, and ${String(artifact.ideas.length)} ideas with ${String(artifact.stats.references)} references.`,
   )
   for (const fileSize of fileSizes) {
     console.log(`Wrote public/data/${fileSize.filename} (${fileSize.sizeLabel})`)

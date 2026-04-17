@@ -54,6 +54,6 @@ test('filters list with fuzzy search', async ({ page }) => {
   await page.goto('/')
   // Wait for the event list to populate before searching
   await expect(page.getByTestId('event-list').getByRole('button').first()).toBeVisible()
-  await page.getByLabel('Search events and focuses').fill('ace pilot')
+  await page.getByLabel('Search events, focuses, decisions, and ideas').fill('ace pilot')
   await expect(page.getByTestId('event-list')).toContainText('Ace Pilot')
 })

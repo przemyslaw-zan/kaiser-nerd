@@ -5,18 +5,21 @@ import type {
   DecisionDoc,
   EventDoc,
   FocusDoc,
+  IdeaDoc,
 } from './types.js'
 
 export const ARTIFACT_INDEX_FILE = 'events-index.json'
 export const EVENT_DETAILS_FILE = 'event-details.json'
 export const FOCUS_DETAILS_FILE = 'focus-details.json'
 export const DECISION_DETAILS_FILE = 'decision-details.json'
+export const IDEA_DETAILS_FILE = 'idea-details.json'
 
 export const ARTIFACT_FILENAMES = [
   ARTIFACT_INDEX_FILE,
   EVENT_DETAILS_FILE,
   FOCUS_DETAILS_FILE,
   DECISION_DETAILS_FILE,
+  IDEA_DETAILS_FILE,
 ] as const
 
 export type EventSummary = Pick<EventDoc, 'id' | 'namespace' | 'sourceFile' | 'titleKey' | 'descKey' | 'title'>
@@ -34,6 +37,9 @@ export type FocusDetails = Pick<
 export type DecisionSummary = Pick<DecisionDoc, 'id' | 'categoryId' | 'sourceFile' | 'titleKey' | 'descKey' | 'title'>
 export type DecisionDetails = Pick<DecisionDoc, 'description' | 'properties' | 'effects' | 'effectTree' | 'references'>
 
+export type IdeaSummary = Pick<IdeaDoc, 'id' | 'categoryId' | 'sourceFile' | 'titleKey' | 'descKey' | 'title'>
+export type IdeaDetails = Pick<IdeaDoc, 'description' | 'properties' | 'effects' | 'effectTree' | 'references'>
+
 export interface DataArtifactIndex {
   version: string
   generatedAt: string
@@ -41,12 +47,14 @@ export interface DataArtifactIndex {
   events: EventSummary[]
   focuses: FocusSummary[]
   decisions: DecisionSummary[]
+  ideas: IdeaSummary[]
 }
 
 export interface DataArtifactDetails {
   events: Record<string, EventDetails>
   focuses: Record<string, FocusDetails>
   decisions: Record<string, DecisionDetails>
+  ideas: Record<string, IdeaDetails>
 }
 
 export interface ArtifactSplit {
@@ -82,6 +90,14 @@ export function splitArtifact(artifact: DataArtifact): ArtifactSplit {
       titleKey: decision.titleKey,
       descKey: decision.descKey,
       title: decision.title,
+    })),
+    ideas: artifact.ideas.map((idea) => ({
+      id: idea.id,
+      categoryId: idea.categoryId,
+      sourceFile: idea.sourceFile,
+      titleKey: idea.titleKey,
+      descKey: idea.descKey,
+      title: idea.title,
     })),
   }
 
@@ -124,6 +140,18 @@ export function splitArtifact(artifact: DataArtifact): ArtifactSplit {
         },
       ]),
     ),
+    ideas: Object.fromEntries(
+      artifact.ideas.map((idea) => [
+        idea.id,
+        {
+          description: idea.description,
+          properties: idea.properties,
+          effects: idea.effects,
+          effectTree: idea.effectTree,
+          references: idea.references,
+        },
+      ]),
+    ),
   }
 
   return { index, details }
@@ -136,6 +164,7 @@ export function getArtifactFileContents(artifact: DataArtifact): Record<string, 
     [EVENT_DETAILS_FILE]: `${JSON.stringify(split.details.events)}\n`,
     [FOCUS_DETAILS_FILE]: `${JSON.stringify(split.details.focuses)}\n`,
     [DECISION_DETAILS_FILE]: `${JSON.stringify(split.details.decisions)}\n`,
+    [IDEA_DETAILS_FILE]: `${JSON.stringify(split.details.ideas)}\n`,
   }
 }
 

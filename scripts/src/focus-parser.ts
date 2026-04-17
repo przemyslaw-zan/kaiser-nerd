@@ -10,6 +10,7 @@ const FOCUS_REFERENCE_KEYS = new Set([
   'unlock_national_focus',
 ])
 const DECISION_REFERENCE_KEYS = new Set(['activate_decision', 'complete_decision', 'cancel_decision'])
+const IDEA_REFERENCE_KEYS = new Set(['add_idea', 'add_ideas', 'remove_idea', 'remove_ideas'])
 
 const SKIP_EFFECT_KEYS = new Set([
   'id',
@@ -384,6 +385,10 @@ function buildReferencesFromAssignment(
 
   if (DECISION_REFERENCE_KEYS.has(assignment.key) && assignment.value.kind === 'scalar' && assignment.value.raw) {
     refs.push({ type: 'decision', targetId: assignment.value.raw, via })
+  }
+
+  if (IDEA_REFERENCE_KEYS.has(assignment.key) && assignment.value.kind === 'scalar' && assignment.value.raw) {
+    refs.push({ type: 'idea', targetId: assignment.value.raw, via })
   }
 
   if (scriptedEffectNames.has(assignment.key)) {

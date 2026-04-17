@@ -26,6 +26,7 @@ country_event = {
   title = poland_events.5.t
   desc = poland_events.5.d
   complete_national_focus = POL_emergency
+  add_ideas = POL_emergency_spirit
   option = {
     name = poland_events.5.a
     country_event = { id = poland_events.6 days = 2 }
@@ -51,6 +52,9 @@ country_event = {
     const eventRef = parsed[0]?.references.find((ref) => ref.type === 'event')
     expect(eventRef?.targetId).toBe('poland_events.6')
     expect(eventRef?.delayDays).toBe(2)
+
+    const ideaRef = parsed[0]?.references.find((ref) => ref.type === 'idea')
+    expect(ideaRef?.targetId).toBe('POL_emergency_spirit')
   })
 
   it('keeps immediate and option scopes separate', async () => {

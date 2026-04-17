@@ -35,6 +35,7 @@ decision_categories = {
         add_political_power = 25
         country_event = { id = eng_events.10 days = 3 }
         complete_national_focus = ENG_focus_branch
+        add_ideas = ENG_industrial_drive
       }
 
       remove_effect = {
@@ -70,5 +71,8 @@ decision_categories = {
 
     const decisionRef = parsed[0]?.references.find((ref) => ref.type === 'decision')
     expect(decisionRef?.targetId).toBe('ENG_emergency_committee')
+
+    const ideaRef = parsed[0]?.references.find((ref) => ref.type === 'idea')
+    expect(ideaRef?.targetId).toBe('ENG_industrial_drive')
   })
 })

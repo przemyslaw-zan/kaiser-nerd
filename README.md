@@ -66,6 +66,7 @@ Current artifact layout:
 - public/data/event-details.json: event descriptions/effects/options/references
 - public/data/focus-details.json: focus descriptions/effects/references
 - public/data/decision-details.json: decision descriptions/effects/references
+- public/data/idea-details.json: idea descriptions/effects/references
 
 ## URL Behavior
 

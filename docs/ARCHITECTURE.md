@@ -5,7 +5,7 @@ The project has two layers:
 1. Data pipeline (Node + TypeScript) in scripts/src
 - Reads Kaiserreich files from KAISERREICH_PATH in .env.
 - Parses events and localization.
-- Extracts event/focus/decision/scripted-effect references.
+- Extracts event/focus/decision/idea/scripted-effect references.
 - Writes deterministic split artifacts to public/data/ (index plus per-domain detail files).
 - Enforces artifact size budgets before CI deploys or contributors push oversized data.
 

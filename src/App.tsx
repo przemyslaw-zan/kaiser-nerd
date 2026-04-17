@@ -3,11 +3,11 @@ import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, use
 import { loadArtifact } from '@/lib/data'
 import { stripHoiFormatting } from '@/lib/text'
 import { readSelectionFromQuery, writeSelectionToQuery } from '@/lib/url-state'
-import type { DataArtifact, DecisionDoc, EventDoc, EventEffectNode, EventReference, FocusDoc } from '@/types/artifact'
+import type { DataArtifact, DecisionDoc, EventDoc, EventEffectNode, EventReference, FocusDoc, IdeaDoc } from '@/types/artifact'
 
 const PAGE_SIZE = 200
 
-type DocKind = 'event' | 'focus' | 'decision'
+type DocKind = 'event' | 'focus' | 'decision' | 'idea'
 
 interface SearchEntry {
   key: string
@@ -62,7 +62,16 @@ interface BrowseDecisionItem {
   doc: DecisionDoc
 }
 
-type BrowseItem = BrowseEventItem | BrowseFocusItem | BrowseDecisionItem
+interface BrowseIdeaItem {
+  kind: 'idea'
+  key: string
+  id: string
+  title: string
+  description?: string
+  doc: IdeaDoc
+}
+
+type BrowseItem = BrowseEventItem | BrowseFocusItem | BrowseDecisionItem | BrowseIdeaItem
 
 function makeDocKey(kind: DocKind, id: string): string {
   return `${kind}:${id}`
@@ -81,19 +90,90 @@ function parseDocKey(key: string): { kind: DocKind; id: string } | null {
     return { kind: 'decision', id: key.slice('decision:'.length) }
   }
 
+  if (key.startsWith('idea:')) {
+    return { kind: 'idea', id: key.slice('idea:'.length) }
+  }
+
   return null
 }
 
-function OptionEffectTree({ nodes }: { nodes: EventEffectNode[] }) {
+function resolveEffectNodeLink(node: EventEffectNode, parentKey?: string): { kind: DocKind; id: string } | null {
+  if (!node.value) {
+    return null
+  }
+
+  if (node.key === 'complete_national_focus' || node.key === 'set_national_focus' || node.key === 'unlock_national_focus') {
+    return { kind: 'focus', id: node.value }
+  }
+
+  if (node.key === 'activate_decision' || node.key === 'complete_decision' || node.key === 'cancel_decision') {
+    return { kind: 'decision', id: node.value }
+  }
+
+  if (node.key === 'add_idea' || node.key === 'add_ideas' || node.key === 'remove_idea' || node.key === 'remove_ideas') {
+    return { kind: 'idea', id: node.value }
+  }
+
+  if (node.key === 'country_event' || node.key === 'news_event' || node.key === 'state_event') {
+    return { kind: 'event', id: node.value }
+  }
+
+  if (node.key === 'id' && (parentKey === 'country_event' || parentKey === 'news_event' || parentKey === 'state_event')) {
+    return { kind: 'event', id: node.value }
+  }
+
+  if (node.key === 'idea' && parentKey === 'add_timed_idea') {
+    return { kind: 'idea', id: node.value }
+  }
+
+  return null
+}
+
+function OptionEffectTree({
+  nodes,
+  onSelectDoc,
+  getDocTitle,
+  parentKey,
+}: {
+  nodes: EventEffectNode[]
+  onSelectDoc: (docKey: string) => void
+  getDocTitle: (kind: DocKind, id: string) => string
+  parentKey?: string
+}) {
   return (
     <ul className="effect-list">
-      {nodes.map((node, index) => (
-        <li key={`${node.key}-${node.value ?? ''}-${String(index)}`}>
-          <span className="effect-key">{node.key}</span>
-          {node.value ? <span className="effect-values"> = {node.value}</span> : null}
-          {node.children && node.children.length > 0 ? <OptionEffectTree nodes={node.children} /> : null}
-        </li>
-      ))}
+      {nodes.map((node, index) => {
+        const linkedDoc = resolveEffectNodeLink(node, parentKey)
+
+        return (
+          <li key={`${node.key}-${node.value ?? ''}-${String(index)}`}>
+            <span className="effect-key">{node.key}</span>
+            {node.value ? (
+              <span className="effect-values">
+                {' = '}
+                {linkedDoc ? (
+                  <DocSelectionLink
+                    kind={linkedDoc.kind}
+                    id={linkedDoc.id}
+                    label={getDocTitle(linkedDoc.kind, linkedDoc.id)}
+                    onSelectDoc={onSelectDoc}
+                  />
+                ) : (
+                  node.value
+                )}
+              </span>
+            ) : null}
+            {node.children && node.children.length > 0 ? (
+              <OptionEffectTree
+                nodes={node.children}
+                onSelectDoc={onSelectDoc}
+                getDocTitle={getDocTitle}
+                parentKey={node.key}
+              />
+            ) : null}
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -124,6 +204,10 @@ function DocSelectionLink({
   )
 }
 
+function isLinkedDocReferenceType(type: EventReference['type']): type is Exclude<EventReference['type'], 'scripted_effect'> {
+  return type === 'event' || type === 'focus' || type === 'decision' || type === 'idea'
+}
+
 function EventSummary({
   event,
   onSelectDoc,
@@ -148,7 +232,7 @@ function EventSummary({
   return (
     <article className="event-detail" data-testid="event-detail">
       <header>
-        <p className="eyebrow">Event</p>
+        <p className="eyebrow">Event · <code>{event.id}</code></p>
         <h2>{event.title ?? event.id}</h2>
         <p>{event.description ? stripHoiFormatting(event.description) : 'No localized description found.'}</p>
       </header>
@@ -156,7 +240,7 @@ function EventSummary({
       <section>
         <h3>Immediate Effects</h3>
         {event.immediateEffectTree && event.immediateEffectTree.length > 0 ? (
-          <OptionEffectTree nodes={event.immediateEffectTree} />
+          <OptionEffectTree nodes={event.immediateEffectTree} onSelectDoc={onSelectDoc} getDocTitle={getDocTitle} />
         ) : (
           <ul>
             {event.immediateEffects.length > 0 ? (
@@ -175,7 +259,7 @@ function EventSummary({
             <div key={`${event.id}-${option.index}`} className="option-card">
               <h4>{option.name ?? option.nameKey ?? `Option ${String(option.index + 1)}`}</h4>
               {option.effectTree && option.effectTree.length > 0 ? (
-                <OptionEffectTree nodes={option.effectTree} />
+                <OptionEffectTree nodes={option.effectTree} onSelectDoc={onSelectDoc} getDocTitle={getDocTitle} />
               ) : option.effects.length > 0 ? (
                 <ul className="effect-list">
                   {option.effects.map((effect) => (
@@ -203,7 +287,7 @@ function EventSummary({
               <ul>
                 {targets.map((target, index) => (
                   <li key={`${type}-${target.targetId}-${String(index)}`}>
-                    {target.type === 'event' || target.type === 'focus' || target.type === 'decision' ? (
+                    {isLinkedDocReferenceType(target.type) ? (
                       <>
                         <DocSelectionLink
                           kind={target.type}
@@ -279,7 +363,7 @@ function FocusSummary({
   return (
     <article className="event-detail">
       <header>
-        <p className="eyebrow">Focus</p>
+        <p className="eyebrow">Focus · <code>{focus.id}</code></p>
         <h2>{focus.title ?? focus.id}</h2>
         <p>{focus.description ? stripHoiFormatting(focus.description) : 'No localized description found.'}</p>
       </header>
@@ -287,7 +371,7 @@ function FocusSummary({
       <section>
         <h3>Completion Reward Effects</h3>
         {focus.completionEffectTree && focus.completionEffectTree.length > 0 ? (
-          <OptionEffectTree nodes={focus.completionEffectTree} />
+          <OptionEffectTree nodes={focus.completionEffectTree} onSelectDoc={onSelectDoc} getDocTitle={getDocTitle} />
         ) : focus.completionEffects.length > 0 ? (
           <ul className="effect-list">
             {focus.completionEffects.map((effect) => (
@@ -339,7 +423,7 @@ function FocusSummary({
               <ul>
                 {targets.map((target, index) => (
                   <li key={`${type}-${target.targetId}-${String(index)}`}>
-                    {target.type === 'event' || target.type === 'focus' || target.type === 'decision' ? (
+                    {isLinkedDocReferenceType(target.type) ? (
                       <>
                         <DocSelectionLink
                           kind={target.type}
@@ -391,7 +475,7 @@ function DecisionSummary({
   return (
     <article className="event-detail">
       <header>
-        <p className="eyebrow">Decision</p>
+        <p className="eyebrow">Decision · <code>{decision.id}</code></p>
         <h2>{decision.title ?? decision.id}</h2>
         <p>{decision.description ? stripHoiFormatting(decision.description) : 'No localized description found.'}</p>
       </header>
@@ -413,7 +497,7 @@ function DecisionSummary({
       <section>
         <h3>Effects</h3>
         {decision.effectTree && decision.effectTree.length > 0 ? (
-          <OptionEffectTree nodes={decision.effectTree} />
+          <OptionEffectTree nodes={decision.effectTree} onSelectDoc={onSelectDoc} getDocTitle={getDocTitle} />
         ) : decision.effects.length > 0 ? (
           <ul className="effect-list">
             {decision.effects.map((effect) => (
@@ -436,7 +520,109 @@ function DecisionSummary({
               <ul>
                 {targets.map((target, index) => (
                   <li key={`${type}-${target.targetId}-${String(index)}`}>
-                    {target.type === 'event' || target.type === 'focus' || target.type === 'decision' ? (
+                    {isLinkedDocReferenceType(target.type) ? (
+                      <>
+                        <DocSelectionLink
+                          kind={target.type}
+                          id={target.targetId}
+                          label={getDocTitle(target.type, target.targetId)}
+                          onSelectDoc={onSelectDoc}
+                        />
+                        {target.type === 'event' && target.delayDays !== undefined ? (
+                          <span className="meta"> (days={String(target.delayDays)})</span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span>{target.targetId}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        ) : (
+          <p>No connected content found.</p>
+        )}
+      </section>
+    </article>
+  )
+}
+
+function IdeaSummary({
+  idea,
+  onSelectDoc,
+  getDocTitle,
+}: {
+  idea: IdeaDoc
+  onSelectDoc: (docKey: string) => void
+  getDocTitle: (kind: DocKind, id: string) => string
+}) {
+  const groupedReferences = useMemo(() => {
+    const buckets = new Map<string, EventReference[]>()
+    for (const reference of idea.references) {
+      const key = reference.type
+      const current = buckets.get(key) ?? []
+      current.push(reference)
+      buckets.set(key, current)
+    }
+
+    return Array.from(buckets.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [idea])
+
+  return (
+    <article className="event-detail">
+      <header>
+        <p className="eyebrow">Idea · <code>{idea.id}</code></p>
+        <h2>{idea.title ?? idea.id}</h2>
+        <p>{idea.description ? stripHoiFormatting(idea.description) : 'No localized description found.'}</p>
+      </header>
+
+      <section>
+        <h3>Category</h3>
+        <p>{idea.categoryId}</p>
+      </section>
+
+      {idea.properties && Object.keys(idea.properties).length > 0 ? (
+        <section>
+          <h3>Properties</h3>
+          <ul className="effect-list">
+            {Object.entries(idea.properties).map(([key, value]) => (
+              <li key={key}>
+                <span className="effect-key">{key}</span>
+                <span className="meta"> = {value}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <section>
+        <h3>Effects</h3>
+        {idea.effectTree && idea.effectTree.length > 0 ? (
+          <OptionEffectTree nodes={idea.effectTree} onSelectDoc={onSelectDoc} getDocTitle={getDocTitle} />
+        ) : idea.effects.length > 0 ? (
+          <ul className="effect-list">
+            {idea.effects.map((effect) => (
+              <li key={`${idea.id}-${effect}`}>
+                <span className="effect-key">{effect}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>None parsed.</p>
+        )}
+      </section>
+
+      <section>
+        <h3>Connected Content</h3>
+        {groupedReferences.length > 0 ? (
+          groupedReferences.map(([type, targets]) => (
+            <div key={type} className="reference-group">
+              <h4>{type}</h4>
+              <ul>
+                {targets.map((target, index) => (
+                  <li key={`${type}-${target.targetId}-${String(index)}`}>
+                    {isLinkedDocReferenceType(target.type) ? (
                       <>
                         <DocSelectionLink
                           kind={target.type}
@@ -502,7 +688,8 @@ function App() {
           const hasUrlKey =
             (fromUrl.kind === 'event' && data.events.some((event) => event.id === fromUrl.id)) ||
             (fromUrl.kind === 'focus' && data.focuses.some((focus) => focus.id === fromUrl.id)) ||
-            (fromUrl.kind === 'decision' && data.decisions.some((decision) => decision.id === fromUrl.id))
+            (fromUrl.kind === 'decision' && data.decisions.some((decision) => decision.id === fromUrl.id)) ||
+            (fromUrl.kind === 'idea' && data.ideas.some((idea) => idea.id === fromUrl.id))
           if (hasUrlKey) {
             setSelectedDocKey(urlKey)
             return
@@ -512,13 +699,16 @@ function App() {
         const firstEvent = data.events.at(0)
         const firstFocus = data.focuses.at(0)
         const firstDecision = data.decisions.at(0)
+        const firstIdea = data.ideas.at(0)
         const fallbackKey = firstEvent
           ? makeDocKey('event', firstEvent.id)
           : firstFocus
             ? makeDocKey('focus', firstFocus.id)
             : firstDecision
               ? makeDocKey('decision', firstDecision.id)
-            : null
+              : firstIdea
+                ? makeDocKey('idea', firstIdea.id)
+              : null
         setSelectedDocKey(fallbackKey)
       })
       .catch((loadError: unknown) => {
@@ -539,7 +729,8 @@ function App() {
         const hasUrlKey =
           (fromUrl.kind === 'event' && artifact.events.some((event) => event.id === fromUrl.id)) ||
           (fromUrl.kind === 'focus' && artifact.focuses.some((focus) => focus.id === fromUrl.id)) ||
-          (fromUrl.kind === 'decision' && artifact.decisions.some((decision) => decision.id === fromUrl.id))
+          (fromUrl.kind === 'decision' && artifact.decisions.some((decision) => decision.id === fromUrl.id)) ||
+          (fromUrl.kind === 'idea' && artifact.ideas.some((idea) => idea.id === fromUrl.id))
         if (hasUrlKey) {
           setSelectedDocKey(urlKey)
           return
@@ -549,13 +740,16 @@ function App() {
       const firstEvent = artifact.events.at(0)
       const firstFocus = artifact.focuses.at(0)
       const firstDecision = artifact.decisions.at(0)
+      const firstIdea = artifact.ideas.at(0)
       const fallbackKey = firstEvent
         ? makeDocKey('event', firstEvent.id)
         : firstFocus
           ? makeDocKey('focus', firstFocus.id)
           : firstDecision
             ? makeDocKey('decision', firstDecision.id)
-          : null
+            : firstIdea
+              ? makeDocKey('idea', firstIdea.id)
+            : null
       setSelectedDocKey(fallbackKey)
     }
 
@@ -608,6 +802,16 @@ function App() {
           doc: decision,
         }),
       ),
+      ...artifact.ideas.map(
+        (idea): BrowseIdeaItem => ({
+          kind: 'idea',
+          key: makeDocKey('idea', idea.id),
+          id: idea.id,
+          title: idea.title ?? idea.id,
+          description: idea.description,
+          doc: idea,
+        }),
+      ),
     ]
 
     return new Map<string, BrowseItem>(rows.map((row) => [row.key, row]))
@@ -622,6 +826,7 @@ function App() {
       ...artifact.events.map((event) => makeDocKey('event', event.id)),
       ...artifact.focuses.map((focus) => makeDocKey('focus', focus.id)),
       ...artifact.decisions.map((decision) => makeDocKey('decision', decision.id)),
+      ...artifact.ideas.map((idea) => makeDocKey('idea', idea.id)),
     ]
   }, [artifact])
 
@@ -645,7 +850,12 @@ function App() {
       title: decision.title,
     }))
 
-    return [...eventEntries, ...focusEntries, ...decisionEntries]
+    const ideaEntries = artifact.ideas.map((idea) => ({
+      key: makeDocKey('idea', idea.id),
+      title: idea.title,
+    }))
+
+    return [...eventEntries, ...focusEntries, ...decisionEntries, ...ideaEntries]
   }, [artifact])
 
   useEffect(() => {
@@ -775,14 +985,14 @@ function App() {
     <main className="layout">
       <aside className="panel panel-left">
         <header>
-          <p className="eyebrow">Kaiser Nerd</p>
-          <h1>Content Browser</h1>
+            <h1>KaiserNerd</h1>
+            <p className="eyebrow">the Kaiserreich content browser</p>
           <p className="meta">
-            {artifact.stats.events} events, {artifact.stats.focuses} focuses, and {artifact.stats.decisions} decisions indexed
+            {artifact.stats.events} events, {artifact.stats.focuses} focuses, {artifact.stats.decisions} decisions, and {artifact.stats.ideas} ideas indexed
           </p>
         </header>
         <label htmlFor="event-search" className="search-label">
-          Search events and focuses
+          Search events, focuses, decisions, and ideas
         </label>
         <input
           id="event-search"
@@ -803,8 +1013,6 @@ function App() {
         </p>
 
         <ul className="event-list" data-testid="event-list">
-          {isSearching ? <li className="meta">Searching…</li> : null}
-          {!isSearching && visibleItems.length === 0 ? <li className="meta">No matching content.</li> : null}
           {!isSearching
             ? visibleItems.map((item) => (
                 <li key={item.key}>
@@ -842,7 +1050,10 @@ function App() {
         {selectedItem?.kind === 'decision' ? (
           <DecisionSummary decision={selectedItem.doc} onSelectDoc={onSelectDoc} getDocTitle={getDocTitle} />
         ) : null}
-        {!selectedItem ? <p>Select an event, focus, or decision from the list.</p> : null}
+        {selectedItem?.kind === 'idea' ? (
+          <IdeaSummary idea={selectedItem.doc} onSelectDoc={onSelectDoc} getDocTitle={getDocTitle} />
+        ) : null}
+        {!selectedItem ? <p>Select an event, focus, decision, or idea from the list.</p> : null}
       </section>
     </main>
   )
