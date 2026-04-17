@@ -34,15 +34,38 @@ The path must point to the Kaiserreich mod root containing events and localisati
 - pnpm lint: strict ESLint checks
 - pnpm test: unit tests
 - pnpm test:e2e: Playwright tests
-- pnpm data:build: parse source data and regenerate public/data/events-index.json
-- pnpm data:check: fail if committed artifact is stale
+- pnpm data:build: parse source data and regenerate files in public/data
+- pnpm data:check: fail if committed artifacts are stale
+- pnpm data:size-check: fail if any artifact file exceeds the size safety budget
 - pnpm ci: local quality gate (type-check + lint + unit + build)
+
+## Git Hooks
+
+Lefthook is installed automatically through the `prepare` script when dependencies are installed.
+
+- pre-commit: fast lint for staged JS/TS files
+- pre-push: artifact size check + full lint + type-check
 
 ## Data Flow
 
 1. Run pnpm data:build.
-2. Commit updated public/data/events-index.json.
-3. App renders the committed artifact from current revision.
+2. Run pnpm data:size-check.
+3. Commit updated files in public/data/.
+4. App renders the committed artifact from current revision.
+
+## Artifact Size Budget
+
+- Warning threshold: 50MB
+- Hard fail threshold: 90MB
+- GitHub hard stop: 100MB per file
+
+The extra buffer is intentional. It gives the repo room to grow and prevents blocked pushes right at GitHub's limit.
+
+Current artifact layout:
+- public/data/events-index.json: lightweight metadata and title/index records
+- public/data/event-details.json: event descriptions/effects/options/references
+- public/data/focus-details.json: focus descriptions/effects/references
+- public/data/decision-details.json: decision descriptions/effects/references
 
 ## URL Behavior
 

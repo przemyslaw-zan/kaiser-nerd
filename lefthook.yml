@@ -1,0 +1,15 @@
+pre-commit:
+  parallel: true
+  commands:
+    lint-staged:
+      glob: "*.{js,jsx,ts,tsx}"
+      run: pnpm exec eslint --max-warnings=0 {staged_files}
+
+pre-push:
+  commands:
+    artifact-size:
+      run: pnpm run data:size-check
+    lint:
+      run: pnpm run lint
+    type-check:
+      run: pnpm run type-check

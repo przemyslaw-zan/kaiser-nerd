@@ -1,8 +1,17 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import dotenv from 'dotenv'
 
+import { getArtifactFileContents, getArtifactFilePaths } from './artifact-files.js'
+import {
+  ARTIFACT_FAILURE_SIZE_MB,
+  ARTIFACT_WARNING_SIZE_MB,
+  formatArtifactSize,
+  getArtifactFileSize,
+  getArtifactSizeStatus,
+} from './artifact-size.js'
 import { parseDecisionFile } from './decision-parser.js'
 import { parseNationalFocusFile } from './focus-parser.js'
 import { getFilesRecursive } from './fs-utils.js'
@@ -157,20 +166,55 @@ async function main(): Promise<void> {
 
   const artifact = await buildArtifactFromPath(sourcePath)
   const outputDir = path.join(process.cwd(), 'public', 'data')
-  const outputPath = path.join(outputDir, 'events-index.json')
+  const outputPaths = getArtifactFilePaths(process.cwd())
+  const fileContents = getArtifactFileContents(artifact)
 
   await ensureDirectory(outputDir)
-  await fs.writeFile(outputPath, `${JSON.stringify(artifact)}\n`, 'utf8')
+  await Promise.all(
+    Object.entries(fileContents).map(([filename, content]) => fs.writeFile(outputPaths[filename], content, 'utf8')),
+  )
+
+  const fileSizes = await Promise.all(
+    Object.keys(fileContents).map(async (filename) => {
+      const filePath = outputPaths[filename]
+      const sizeBytes = await getArtifactFileSize(filePath)
+      return {
+        filename,
+        sizeBytes,
+        sizeLabel: formatArtifactSize(sizeBytes),
+        status: getArtifactSizeStatus(sizeBytes),
+      }
+    }),
+  )
+
+  const largestFile = fileSizes.reduce((largest, next) => (next.sizeBytes > largest.sizeBytes ? next : largest), fileSizes[0])
 
   // Keep output compact and explicit for CI logs.
   console.log(
     `Generated ${String(artifact.events.length)} events, ${String(artifact.focuses.length)} focuses, and ${String(artifact.decisions.length)} decisions with ${String(artifact.stats.references)} references.`,
   )
-  console.log(`Wrote ${path.relative(process.cwd(), outputPath)}`)
+  for (const fileSize of fileSizes) {
+    console.log(`Wrote public/data/${fileSize.filename} (${fileSize.sizeLabel})`)
+  }
+
+  if (largestFile.status === 'failure') {
+    console.warn(
+      `Warning: largest artifact file (${largestFile.filename}) exceeds the ${String(ARTIFACT_FAILURE_SIZE_MB)}MB safety limit.`,
+    )
+  } else if (largestFile.status === 'warning') {
+    console.warn(
+      `Warning: largest artifact file (${largestFile.filename}) exceeds the ${String(ARTIFACT_WARNING_SIZE_MB)}MB warning threshold.`,
+    )
+  }
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error)
-  console.error(message)
-  process.exitCode = 1
-})
+const isDirectExecution =
+  typeof process.argv[1] === 'string' && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isDirectExecution) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(message)
+    process.exitCode = 1
+  })
+}
