@@ -459,7 +459,7 @@ function extractDecisionProperties(decisionBlock: ClausewitzBlock): Record<strin
     } else if (assignment.key === 'ai_will_do' && assignment.value.kind === 'block') {
       const factor = getScalarAssignment(assignment.value, 'factor')
       if (factor !== undefined) {
-        properties['ai_will_do'] = factor
+        properties.ai_will_do = factor
       }
     } else if (DECISION_BLOCK_PROPERTY_KEYS.has(assignment.key) && assignment.value.kind === 'block') {
       properties[assignment.key] = '(conditional)'
