@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import dotenv from 'dotenv'
 
+import { parseNationalFocusFile } from './focus-parser.js'
 import { getFilesRecursive } from './fs-utils.js'
 import { parseLocalizationFiles } from './localization.js'
 import { buildIncomingEventLinks, collectScriptedEffectNames, parseEventFile } from './paradox-parser.js'
@@ -49,19 +50,41 @@ function sortArtifact(artifact: DataArtifact): DataArtifact {
     }))
     .sort((a, b) => a.id.localeCompare(b.id))
 
+  const sortedFocuses = artifact.focuses
+    .map((focus) => ({
+      ...focus,
+      prerequisiteFocusIds: [...focus.prerequisiteFocusIds].sort((a, b) => a.localeCompare(b)),
+      completionEffects: [...focus.completionEffects].sort((a, b) => a.localeCompare(b)),
+      references: [...focus.references].sort((a, b) => {
+        const byType = a.type.localeCompare(b.type)
+        if (byType !== 0) {
+          return byType
+        }
+        const byId = a.targetId.localeCompare(b.targetId)
+        if (byId !== 0) {
+          return byId
+        }
+        return (a.delayDays ?? -1) - (b.delayDays ?? -1)
+      }),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+
   return {
     ...artifact,
     events: sortedEvents,
+    focuses: sortedFocuses,
   }
 }
 
 export async function buildArtifactFromPath(sourcePath: string): Promise<DataArtifact> {
   const eventsDir = path.join(sourcePath, 'events')
+  const nationalFocusesDir = path.join(sourcePath, 'common', 'national_focus')
   const localizationDir = path.join(sourcePath, 'localisation', 'english')
   const scriptedEffectsDir = path.join(sourcePath, 'common', 'scripted_effects')
 
-  const [eventFiles, localizationFiles, scriptedEffectFiles] = await Promise.all([
+  const [eventFiles, focusFiles, localizationFiles, scriptedEffectFiles] = await Promise.all([
     getFilesRecursive(eventsDir, '.txt'),
+    getFilesRecursive(nationalFocusesDir, '.txt').catch(() => []),
     getFilesRecursive(localizationDir, '.yml'),
     getFilesRecursive(scriptedEffectsDir, '.txt').catch(() => []),
   ])
@@ -72,19 +95,27 @@ export async function buildArtifactFromPath(sourcePath: string): Promise<DataArt
   const parsedEvents = await Promise.all(
     eventFiles.map((filePath) => parseEventFile(filePath, localization, scriptedEffectNames, sourcePath)),
   )
+  const parsedFocuses = await Promise.all(
+    focusFiles.map((filePath) => parseNationalFocusFile(filePath, localization, scriptedEffectNames, sourcePath)),
+  )
 
   const eventsWithIncoming = buildIncomingEventLinks(parsedEvents.flat())
-  const totalReferences = eventsWithIncoming.reduce((sum, event) => sum + event.references.length, 0)
+  const focusDocs = parsedFocuses.flat()
+  const eventReferenceCount = eventsWithIncoming.reduce((sum, event) => sum + event.references.length, 0)
+  const focusReferenceCount = focusDocs.reduce((sum, focus) => sum + focus.references.length, 0)
+  const totalReferences = eventReferenceCount + focusReferenceCount
 
   return sortArtifact({
     version: '1',
     generatedAt: new Date().toISOString(),
     stats: {
       events: eventsWithIncoming.length,
+      focuses: focusDocs.length,
       localizationEntries: localization.size,
       references: totalReferences,
     },
     events: eventsWithIncoming,
+    focuses: focusDocs,
   })
 }
 
@@ -103,7 +134,9 @@ async function main(): Promise<void> {
   await fs.writeFile(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
 
   // Keep output compact and explicit for CI logs.
-  console.log(`Generated ${String(artifact.events.length)} events with ${String(artifact.stats.references)} references.`)
+  console.log(
+    `Generated ${String(artifact.events.length)} events and ${String(artifact.focuses.length)} focuses with ${String(artifact.stats.references)} references.`,
+  )
   console.log(`Wrote ${path.relative(process.cwd(), outputPath)}`)
 }
 

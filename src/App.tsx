@@ -2,15 +2,24 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 
 import { loadArtifact } from '@/lib/data'
 import { stripHoiFormatting } from '@/lib/text'
-import { readEventFromQuery, writeEventToQuery } from '@/lib/url-state'
-import type { DataArtifact, EventDoc, EventEffectNode } from '@/types/artifact'
+import { readSelectionFromQuery, writeSelectionToQuery } from '@/lib/url-state'
+import type { DataArtifact, EventDoc, EventEffectNode, FocusDoc } from '@/types/artifact'
 
 const PAGE_SIZE = 200
+
+type DocKind = 'event' | 'focus'
+
+interface SearchEntry {
+  key: string
+  title?: string
+  description?: string
+  secondaryText?: string
+}
 
 type SearchWorkerRequest =
   | {
       type: 'init'
-      events: EventDoc[]
+      entries: SearchEntry[]
     }
   | {
       type: 'search'
@@ -25,8 +34,44 @@ type SearchWorkerResponse =
   | {
       type: 'result'
       requestId: number
-      eventIds: string[] | null
+      docKeys: string[] | null
     }
+
+interface BrowseEventItem {
+  kind: 'event'
+  key: string
+  id: string
+  title: string
+  description?: string
+  doc: EventDoc
+}
+
+interface BrowseFocusItem {
+  kind: 'focus'
+  key: string
+  id: string
+  title: string
+  description?: string
+  doc: FocusDoc
+}
+
+type BrowseItem = BrowseEventItem | BrowseFocusItem
+
+function makeDocKey(kind: DocKind, id: string): string {
+  return `${kind}:${id}`
+}
+
+function parseDocKey(key: string): { kind: DocKind; id: string } | null {
+  if (key.startsWith('event:')) {
+    return { kind: 'event', id: key.slice('event:'.length) }
+  }
+
+  if (key.startsWith('focus:')) {
+    return { kind: 'focus', id: key.slice('focus:'.length) }
+  }
+
+  return null
+}
 
 function OptionEffectTree({ nodes }: { nodes: EventEffectNode[] }) {
   return (
@@ -133,14 +178,118 @@ function EventSummary({ event }: { event: EventDoc }) {
   )
 }
 
+function FocusSummary({ focus }: { focus: FocusDoc }) {
+  const prerequisiteGroups = useMemo(() => {
+    if (focus.prerequisiteFocusGroups && focus.prerequisiteFocusGroups.length > 0) {
+      return focus.prerequisiteFocusGroups
+    }
+
+    if (focus.prerequisiteFocusIds.length > 0) {
+      return focus.prerequisiteFocusIds.map((id) => [id])
+    }
+
+    return []
+  }, [focus.prerequisiteFocusGroups, focus.prerequisiteFocusIds])
+
+  const groupedReferences = useMemo(() => {
+    const buckets = new Map<string, string[]>()
+    for (const reference of focus.references) {
+      const key = reference.type
+      const current = buckets.get(key) ?? []
+      const withDelay =
+        reference.type === 'event' && reference.delayDays !== undefined
+          ? `${reference.targetId} (days=${String(reference.delayDays)})`
+          : reference.targetId
+      current.push(withDelay)
+      buckets.set(key, current)
+    }
+
+    return Array.from(buckets.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [focus])
+
+  return (
+    <article className="event-detail">
+      <header>
+        <p className="eyebrow">{focus.id}</p>
+        <h2>{focus.title ?? focus.id}</h2>
+        <p>{focus.description ? stripHoiFormatting(focus.description) : 'No localized description found.'}</p>
+      </header>
+
+      <section>
+        <h3>Completion Reward Effects</h3>
+        {focus.completionEffectTree && focus.completionEffectTree.length > 0 ? (
+          <OptionEffectTree nodes={focus.completionEffectTree} />
+        ) : focus.completionEffects.length > 0 ? (
+          <ul className="effect-list">
+            {focus.completionEffects.map((effect) => (
+              <li key={`${focus.id}-${effect}`}>
+                <span className="effect-key">{effect}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>None parsed.</p>
+        )}
+      </section>
+
+      <section>
+        <h3>Prerequisites</h3>
+        {prerequisiteGroups.length > 0 ? (
+          <ol>
+            {prerequisiteGroups.map((group, index) => (
+              <li key={`${focus.id}-prereq-group-${String(index)}`}>
+                {group.length > 1 ? (
+                  <span>
+                    (
+                    {group.map((id, groupIndex) => (
+                      <span key={`${focus.id}-prereq-${String(index)}-${id}`}>
+                        {groupIndex > 0 ? ' OR ' : ''}
+                        {id}
+                      </span>
+                    ))}
+                    )
+                  </span>
+                ) : (
+                  <span>{group[0]}</span>
+                )}
+                {index < prerequisiteGroups.length - 1 ? <span className="meta"> AND</span> : null}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p>No prerequisite focus links found.</p>
+        )}
+      </section>
+
+      <section>
+        <h3>Connected Content</h3>
+        {groupedReferences.length > 0 ? (
+          groupedReferences.map(([type, targets]) => (
+            <div key={type} className="reference-group">
+              <h4>{type}</h4>
+              <ul>
+                {targets.map((target) => (
+                  <li key={`${type}-${target}`}>{target}</li>
+                ))}
+              </ul>
+            </div>
+          ))
+        ) : (
+          <p>No connected content found.</p>
+        )}
+      </section>
+    </article>
+  )
+}
+
 function App() {
   const [artifact, setArtifact] = useState<DataArtifact | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [query, setQuery] = useState('')
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  const [selectedDocKey, setSelectedDocKey] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
-  const [filteredEventIds, setFilteredEventIds] = useState<string[] | null>(null)
+  const [filteredDocKeys, setFilteredDocKeys] = useState<string[] | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const workerRef = useRef<Worker | null>(null)
   const workerReadyRef = useRef(false)
@@ -162,11 +311,29 @@ function App() {
     loadArtifact()
       .then((data) => {
         setArtifact(data)
-        setFilteredEventIds(null)
+        setFilteredDocKeys(null)
         setIsSearching(false)
-        const fromUrl = readEventFromQuery(window.location.search)
-        const first = data.events.at(0)?.id ?? null
-        setSelectedEventId(fromUrl ?? first)
+
+        const fromUrl = readSelectionFromQuery(window.location.search)
+        if (fromUrl) {
+          const urlKey = makeDocKey(fromUrl.kind, fromUrl.id)
+          const hasUrlKey =
+            (fromUrl.kind === 'event' && data.events.some((event) => event.id === fromUrl.id)) ||
+            (fromUrl.kind === 'focus' && data.focuses.some((focus) => focus.id === fromUrl.id))
+          if (hasUrlKey) {
+            setSelectedDocKey(urlKey)
+            return
+          }
+        }
+
+        const firstEvent = data.events.at(0)
+        const firstFocus = data.focuses.at(0)
+        const fallbackKey = firstEvent
+          ? makeDocKey('event', firstEvent.id)
+          : firstFocus
+            ? makeDocKey('focus', firstFocus.id)
+            : null
+        setSelectedDocKey(fallbackKey)
       })
       .catch((loadError: unknown) => {
         const message = loadError instanceof Error ? loadError.message : String(loadError)
@@ -176,20 +343,65 @@ function App() {
 
   const deferredQuery = useDeferredValue(query)
 
-  const eventById = useMemo(() => {
+  const docByKey = useMemo(() => {
     if (!artifact) {
-      return new Map<string, EventDoc>()
+      return new Map<string, BrowseItem>()
     }
 
-    return new Map<string, EventDoc>(artifact.events.map((event) => [event.id, event]))
+    const rows: BrowseItem[] = [
+      ...artifact.events.map(
+        (event): BrowseEventItem => ({
+          kind: 'event',
+          key: makeDocKey('event', event.id),
+          id: event.id,
+          title: event.title ?? event.id,
+          description: event.description,
+          doc: event,
+        }),
+      ),
+      ...artifact.focuses.map(
+        (focus): BrowseFocusItem => ({
+          kind: 'focus',
+          key: makeDocKey('focus', focus.id),
+          id: focus.id,
+          title: focus.title ?? focus.id,
+          description: focus.description,
+          doc: focus,
+        }),
+      ),
+    ]
+
+    return new Map<string, BrowseItem>(rows.map((row) => [row.key, row]))
   }, [artifact])
 
-  const allEventIds = useMemo(() => {
+  const allDocKeys = useMemo(() => {
     if (!artifact) {
       return []
     }
 
-    return artifact.events.map((event) => event.id)
+    return [...artifact.events.map((event) => makeDocKey('event', event.id)), ...artifact.focuses.map((focus) => makeDocKey('focus', focus.id))]
+  }, [artifact])
+
+  const searchEntries = useMemo<SearchEntry[]>(() => {
+    if (!artifact) {
+      return []
+    }
+
+    const eventEntries = artifact.events.map((event) => ({
+      key: makeDocKey('event', event.id),
+      title: event.title,
+      description: event.description,
+      secondaryText: event.options.map((option) => option.name ?? '').join(' '),
+    }))
+
+    const focusEntries = artifact.focuses.map((focus) => ({
+      key: makeDocKey('focus', focus.id),
+      title: focus.title,
+      description: focus.description,
+      secondaryText: [...focus.prerequisiteFocusIds, ...focus.completionEffects].join(' '),
+    }))
+
+    return [...eventEntries, ...focusEntries]
   }, [artifact])
 
   useEffect(() => {
@@ -224,13 +436,13 @@ function App() {
         return
       }
 
-      setFilteredEventIds(message.data.eventIds)
+      setFilteredDocKeys(message.data.docKeys)
       setIsSearching(false)
     }
 
     const initMessage: SearchWorkerRequest = {
       type: 'init',
-      events: artifact.events,
+      entries: searchEntries,
     }
     worker.postMessage(initMessage)
 
@@ -238,7 +450,7 @@ function App() {
       workerRef.current = null
       worker.terminate()
     }
-  }, [artifact])
+  }, [artifact, searchEntries])
 
   useEffect(() => {
     latestQueryRef.current = deferredQuery
@@ -258,29 +470,45 @@ function App() {
     workerRef.current.postMessage(searchMessage)
   }, [deferredQuery])
 
-  const filteredIds = useMemo(() => {
-    return filteredEventIds ?? allEventIds
-  }, [allEventIds, filteredEventIds])
+  const filteredKeys = useMemo(() => {
+    return filteredDocKeys ?? allDocKeys
+  }, [allDocKeys, filteredDocKeys])
 
-  const visibleEventIds = useMemo(() => {
-    return filteredIds.slice(0, visibleCount)
-  }, [filteredIds, visibleCount])
+  const visibleDocKeys = useMemo(() => {
+    return filteredKeys.slice(0, visibleCount)
+  }, [filteredKeys, visibleCount])
 
-  const visibleEvents = useMemo(() => {
-    return visibleEventIds.map((eventId) => eventById.get(eventId)).filter((event): event is EventDoc => event !== undefined)
-  }, [eventById, visibleEventIds])
+  const visibleItems = useMemo(() => {
+    return visibleDocKeys.map((docKey) => docByKey.get(docKey)).filter((item): item is BrowseItem => item !== undefined)
+  }, [docByKey, visibleDocKeys])
 
-  const selectedEvent = useMemo(() => {
-    if (!selectedEventId) {
+  const effectiveSelectedDocKey = useMemo(() => {
+    if (selectedDocKey && docByKey.has(selectedDocKey)) {
+      return selectedDocKey
+    }
+
+    return filteredKeys[0] ?? null
+  }, [docByKey, filteredKeys, selectedDocKey])
+
+  const selectedItem = useMemo(() => {
+    if (!effectiveSelectedDocKey) {
       return null
     }
 
-    return eventById.get(selectedEventId) ?? null
-  }, [eventById, selectedEventId])
+    return docByKey.get(effectiveSelectedDocKey) ?? null
+  }, [docByKey, effectiveSelectedDocKey])
 
-  const onSelectEvent = (eventId: string): void => {
-    setSelectedEventId(eventId)
-    const nextQuery = writeEventToQuery(window.location.search, eventId)
+  const onSelectDoc = (docKey: string): void => {
+    const parsed = parseDocKey(docKey)
+    if (!parsed) {
+      return
+    }
+
+    setSelectedDocKey(docKey)
+    const nextQuery = writeSelectionToQuery(window.location.search, {
+      kind: parsed.kind,
+      id: parsed.id,
+    })
     window.history.pushState(null, '', `${window.location.pathname}${nextQuery}`)
   }
 
@@ -297,62 +525,68 @@ function App() {
       <aside className="panel panel-left">
         <header>
           <p className="eyebrow">Kaiser Nerd</p>
-          <h1>Event Browser</h1>
-          <p className="meta">{artifact.stats.events} events indexed</p>
+          <h1>Content Browser</h1>
+          <p className="meta">
+            {artifact.stats.events} events and {artifact.stats.focuses} focuses indexed
+          </p>
         </header>
         <label htmlFor="event-search" className="search-label">
-          Search events
+          Search events and focuses
         </label>
         <input
           id="event-search"
           value={inputValue}
           onChange={(event) => {
             setIsSearching(true)
-            setFilteredEventIds([])
+            setFilteredDocKeys([])
             setInputValue(event.target.value)
             setVisibleCount(PAGE_SIZE)
           }}
-          placeholder="Type event title or id"
+          placeholder="Type an id, title, or effect"
           autoComplete="off"
         />
 
         <p className="meta">
-          Showing {String(visibleEvents.length)} of {String(filteredIds.length)} matches
+          Showing {String(visibleItems.length)} of {String(filteredKeys.length)} matches
           {isSearching ? ' (searching...)' : ''}
         </p>
 
         <ul className="event-list" data-testid="event-list">
           {isSearching ? <li className="meta">Searching…</li> : null}
-          {!isSearching && visibleEvents.length === 0 ? <li className="meta">No matching events.</li> : null}
+          {!isSearching && visibleItems.length === 0 ? <li className="meta">No matching content.</li> : null}
           {!isSearching
-            ? visibleEvents.map((event) => (
-                <li key={event.id}>
+            ? visibleItems.map((item) => (
+                <li key={item.key}>
                   <button
                     type="button"
-                    className={event.id === selectedEvent?.id ? 'event-link active' : 'event-link'}
-                    onClick={() => onSelectEvent(event.id)}
+                    className={item.key === selectedItem?.key ? 'event-link active' : 'event-link'}
+                    onClick={() => onSelectDoc(item.key)}
                   >
-                    <strong>{event.title ?? event.id}</strong>
-                    <span>{event.id}</span>
+                    <strong>{item.title}</strong>
+                    <span>
+                      {item.kind}: {item.id}
+                    </span>
                   </button>
                 </li>
               ))
             : null}
         </ul>
 
-        {filteredIds.length > visibleEvents.length ? (
+        {filteredKeys.length > visibleItems.length ? (
           <button
             type="button"
             className="event-link"
             onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
           >
-            Load more events
+            Load more
           </button>
         ) : null}
       </aside>
 
       <section className="panel panel-right">
-        {selectedEvent ? <EventSummary event={selectedEvent} /> : <p>Select an event from the list.</p>}
+        {selectedItem?.kind === 'event' ? <EventSummary event={selectedItem.doc} /> : null}
+        {selectedItem?.kind === 'focus' ? <FocusSummary focus={selectedItem.doc} /> : null}
+        {!selectedItem ? <p>Select an event or focus from the list.</p> : null}
       </section>
     </main>
   )

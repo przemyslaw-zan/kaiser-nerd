@@ -2,19 +2,24 @@
 
 import Fuse from 'fuse.js'
 
-import type { EventDoc } from '../types/artifact'
+interface SearchEntry {
+  key: string
+  title?: string
+  description?: string
+  secondaryText?: string
+}
 
 interface SearchRow {
-  id: string
+  key: string
   searchableTitle: string
   searchableDescription: string
-  optionNames: string
+  secondaryText: string
 }
 
 type SearchWorkerRequest =
   | {
       type: 'init'
-      events: EventDoc[]
+      entries: SearchEntry[]
     }
   | {
       type: 'search'
@@ -29,22 +34,22 @@ type SearchWorkerResponse =
   | {
       type: 'result'
       requestId: number
-      eventIds: string[] | null
+      docKeys: string[] | null
     }
 
 let searchIndex: Fuse<SearchRow> | null = null
 
 self.onmessage = (message: MessageEvent<SearchWorkerRequest>) => {
   if (message.data.type === 'init') {
-    const rows: SearchRow[] = message.data.events.map((event) => ({
-      id: event.id,
-      searchableTitle: event.title ?? '',
-      searchableDescription: event.description ?? '',
-      optionNames: event.options.map((option) => option.name ?? '').join(' '),
+    const rows: SearchRow[] = message.data.entries.map((entry) => ({
+      key: entry.key,
+      searchableTitle: entry.title ?? '',
+      searchableDescription: entry.description ?? '',
+      secondaryText: entry.secondaryText ?? '',
     }))
 
     searchIndex = new Fuse(rows, {
-      keys: ['id', 'searchableTitle', 'searchableDescription', 'optionNames'],
+      keys: ['key', 'searchableTitle', 'searchableDescription', 'secondaryText'],
       threshold: 0.32,
       includeScore: true,
       ignoreLocation: true,
@@ -60,7 +65,7 @@ self.onmessage = (message: MessageEvent<SearchWorkerRequest>) => {
     const response: SearchWorkerResponse = {
       type: 'result',
       requestId: message.data.requestId,
-      eventIds: null,
+      docKeys: null,
     }
     self.postMessage(response)
     return
@@ -70,17 +75,17 @@ self.onmessage = (message: MessageEvent<SearchWorkerRequest>) => {
     const response: SearchWorkerResponse = {
       type: 'result',
       requestId: message.data.requestId,
-      eventIds: [],
+      docKeys: [],
     }
     self.postMessage(response)
     return
   }
 
-  const eventIds = searchIndex.search(trimmedQuery).map((row) => row.item.id)
+  const docKeys = searchIndex.search(trimmedQuery).map((row) => row.item.key)
   const response: SearchWorkerResponse = {
     type: 'result',
     requestId: message.data.requestId,
-    eventIds,
+    docKeys,
   }
   self.postMessage(response)
 }
