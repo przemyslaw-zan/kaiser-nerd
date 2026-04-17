@@ -91,6 +91,11 @@ country_event = {
     const first = parsed[0]
     expect(first.immediateEffects).toContain('add_stability')
     expect(first.immediateEffects).not.toContain('add_political_power')
+    const immediateNode = first.immediateEffectTree?.find((entry) => entry.key === 'add_stability')
+    expect(immediateNode?.value).toBe('0.05')
+    const immediateEventNode = first.immediateEffectTree?.find((entry) => entry.key === 'country_event')
+    expect(immediateEventNode?.children?.find((entry) => entry.key === 'id')?.value).toBe('test_events.2')
+    expect(immediateEventNode?.children?.find((entry) => entry.key === 'days')?.value).toBe('4')
 
     expect(first.options[0]?.effects).toContain('add_political_power')
     const powerNode = first.options[0]?.effectTree?.find((entry) => entry.key === 'add_political_power')
@@ -216,6 +221,54 @@ country_event = {
     expect(popularityNode?.children?.find((entry) => entry.key === 'popularity')?.value).toBe('0.05')
   })
 
+  it('parses nested immediate effect objects recursively', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kr-parser-'))
+    tempDirs.push(tempDir)
+
+    const filePath = path.join(tempDir, 'nested-immediate-effect-tree-test.txt')
+    const content = `
+country_event = {
+  id = nested_events.2
+  title = nested_events.2.t
+  desc = nested_events.2.d
+
+  immediate = {
+    hidden_effect = {
+      if = {
+        limit = {
+          has_government = democratic
+        }
+        country_event = {
+          id = nested_events.3
+          days = 5
+        }
+      }
+    }
+  }
+}
+`
+
+    await fs.writeFile(filePath, content, 'utf8')
+
+    const localization = new Map<string, string>([
+      ['nested_events.2.t', 'Nested Immediate Event'],
+      ['nested_events.2.d', 'Description'],
+    ])
+
+    const parsed = await parseEventFile(filePath, localization, new Set<string>(), tempDir)
+    expect(parsed).toHaveLength(1)
+
+    const hiddenEffectNode = parsed[0]?.immediateEffectTree?.find((entry) => entry.key === 'hidden_effect')
+    expect(hiddenEffectNode).toBeDefined()
+    const ifNode = hiddenEffectNode?.children?.find((entry) => entry.key === 'if')
+    expect(ifNode).toBeDefined()
+    const limitNode = ifNode?.children?.find((entry) => entry.key === 'limit')
+    expect(limitNode?.children?.find((entry) => entry.key === 'has_government')?.value).toBe('democratic')
+    const eventNode = ifNode?.children?.find((entry) => entry.key === 'country_event')
+    expect(eventNode?.children?.find((entry) => entry.key === 'id')?.value).toBe('nested_events.3')
+    expect(eventNode?.children?.find((entry) => entry.key === 'days')?.value).toBe('5')
+  })
+
   it('builds incoming event links', () => {
     const items = buildIncomingEventLinks([
       {
@@ -223,6 +276,7 @@ country_event = {
         namespace: 'a',
         sourceFile: 'events/a.txt',
         immediateEffects: [],
+        immediateEffectTree: [],
         options: [],
         references: [{ type: 'event', targetId: 'a.2', via: 'body' }],
         incomingEventIds: [],
@@ -232,6 +286,7 @@ country_event = {
         namespace: 'a',
         sourceFile: 'events/a.txt',
         immediateEffects: [],
+        immediateEffectTree: [],
         options: [],
         references: [],
         incomingEventIds: [],

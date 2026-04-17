@@ -42,4 +42,9 @@ describe('searchEvents', () => {
     const result = searchEvents(events, 'germany_events.9')
     expect(result.at(0)?.id).toBe('germany_events.9')
   })
+
+  it('does not search descriptions', () => {
+    const result = searchEvents(events, 'Warsaw')
+    expect(result).toHaveLength(0)
+  })
 })

@@ -29,6 +29,7 @@ export interface EventDoc {
   title?: string
   description?: string
   immediateEffects: string[]
+  immediateEffectTree?: EventEffectNode[]
   options: EventOption[]
   references: EventReference[]
   incomingEventIds: string[]
@@ -49,15 +50,31 @@ export interface FocusDoc {
   references: EventReference[]
 }
 
+export interface DecisionDoc {
+  id: string
+  categoryId: string
+  sourceFile: string
+  titleKey?: string
+  descKey?: string
+  title?: string
+  description?: string
+  properties?: Record<string, string>
+  effects: string[]
+  effectTree?: EventEffectNode[]
+  references: EventReference[]
+}
+
 export interface DataArtifact {
   version: string
   generatedAt: string
   stats: {
     events: number
     focuses: number
+    decisions: number
     localizationEntries: number
     references: number
   }
   events: EventDoc[]
   focuses: FocusDoc[]
+  decisions: DecisionDoc[]
 }

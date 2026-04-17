@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import dotenv from 'dotenv'
 
+import { parseDecisionFile } from './decision-parser.js'
 import { parseNationalFocusFile } from './focus-parser.js'
 import { getFilesRecursive } from './fs-utils.js'
 import { parseLocalizationFiles } from './localization.js'
@@ -69,22 +70,43 @@ function sortArtifact(artifact: DataArtifact): DataArtifact {
     }))
     .sort((a, b) => a.id.localeCompare(b.id))
 
+  const sortedDecisions = artifact.decisions
+    .map((decision) => ({
+      ...decision,
+      effects: [...decision.effects].sort((a, b) => a.localeCompare(b)),
+      references: [...decision.references].sort((a, b) => {
+        const byType = a.type.localeCompare(b.type)
+        if (byType !== 0) {
+          return byType
+        }
+        const byId = a.targetId.localeCompare(b.targetId)
+        if (byId !== 0) {
+          return byId
+        }
+        return (a.delayDays ?? -1) - (b.delayDays ?? -1)
+      }),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+
   return {
     ...artifact,
     events: sortedEvents,
     focuses: sortedFocuses,
+    decisions: sortedDecisions,
   }
 }
 
 export async function buildArtifactFromPath(sourcePath: string): Promise<DataArtifact> {
   const eventsDir = path.join(sourcePath, 'events')
   const nationalFocusesDir = path.join(sourcePath, 'common', 'national_focus')
+  const decisionsDir = path.join(sourcePath, 'common', 'decisions')
   const localizationDir = path.join(sourcePath, 'localisation', 'english')
   const scriptedEffectsDir = path.join(sourcePath, 'common', 'scripted_effects')
 
-  const [eventFiles, focusFiles, localizationFiles, scriptedEffectFiles] = await Promise.all([
+  const [eventFiles, focusFiles, decisionFiles, localizationFiles, scriptedEffectFiles] = await Promise.all([
     getFilesRecursive(eventsDir, '.txt'),
     getFilesRecursive(nationalFocusesDir, '.txt').catch(() => []),
+    getFilesRecursive(decisionsDir, '.txt').catch(() => []),
     getFilesRecursive(localizationDir, '.yml'),
     getFilesRecursive(scriptedEffectsDir, '.txt').catch(() => []),
   ])
@@ -98,12 +120,17 @@ export async function buildArtifactFromPath(sourcePath: string): Promise<DataArt
   const parsedFocuses = await Promise.all(
     focusFiles.map((filePath) => parseNationalFocusFile(filePath, localization, scriptedEffectNames, sourcePath)),
   )
+  const parsedDecisions = await Promise.all(
+    decisionFiles.map((filePath) => parseDecisionFile(filePath, localization, scriptedEffectNames, sourcePath)),
+  )
 
   const eventsWithIncoming = buildIncomingEventLinks(parsedEvents.flat())
   const focusDocs = parsedFocuses.flat()
+  const decisionDocs = parsedDecisions.flat()
   const eventReferenceCount = eventsWithIncoming.reduce((sum, event) => sum + event.references.length, 0)
   const focusReferenceCount = focusDocs.reduce((sum, focus) => sum + focus.references.length, 0)
-  const totalReferences = eventReferenceCount + focusReferenceCount
+  const decisionReferenceCount = decisionDocs.reduce((sum, decision) => sum + decision.references.length, 0)
+  const totalReferences = eventReferenceCount + focusReferenceCount + decisionReferenceCount
 
   return sortArtifact({
     version: '1',
@@ -111,11 +138,13 @@ export async function buildArtifactFromPath(sourcePath: string): Promise<DataArt
     stats: {
       events: eventsWithIncoming.length,
       focuses: focusDocs.length,
+      decisions: decisionDocs.length,
       localizationEntries: localization.size,
       references: totalReferences,
     },
     events: eventsWithIncoming,
     focuses: focusDocs,
+    decisions: decisionDocs,
   })
 }
 
@@ -131,11 +160,11 @@ async function main(): Promise<void> {
   const outputPath = path.join(outputDir, 'events-index.json')
 
   await ensureDirectory(outputDir)
-  await fs.writeFile(outputPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
+  await fs.writeFile(outputPath, `${JSON.stringify(artifact)}\n`, 'utf8')
 
   // Keep output compact and explicit for CI logs.
   console.log(
-    `Generated ${String(artifact.events.length)} events and ${String(artifact.focuses.length)} focuses with ${String(artifact.stats.references)} references.`,
+    `Generated ${String(artifact.events.length)} events, ${String(artifact.focuses.length)} focuses, and ${String(artifact.decisions.length)} decisions with ${String(artifact.stats.references)} references.`,
   )
   console.log(`Wrote ${path.relative(process.cwd(), outputPath)}`)
 }

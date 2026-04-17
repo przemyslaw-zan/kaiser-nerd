@@ -4,21 +4,17 @@ import type { EventDoc } from '@/types/artifact'
 
 interface SearchRow {
   event: EventDoc
-  searchableTitle: string
-  searchableDescription: string
-  optionNames: string
+  title: string
 }
 
 export function createEventSearch(events: EventDoc[]): Fuse<SearchRow> {
   const rows: SearchRow[] = events.map((event) => ({
     event,
-    searchableTitle: event.title ?? '',
-    searchableDescription: event.description ?? '',
-    optionNames: event.options.map((option) => option.name ?? '').join(' '),
+    title: event.title ?? '',
   }))
 
   return new Fuse(rows, {
-    keys: ['event.id', 'searchableTitle', 'searchableDescription', 'optionNames'],
+    keys: ['event.id', 'title'],
     threshold: 0.32,
     includeScore: true,
     ignoreLocation: true,

@@ -5,15 +5,11 @@ import Fuse from 'fuse.js'
 interface SearchEntry {
   key: string
   title?: string
-  description?: string
-  secondaryText?: string
 }
 
 interface SearchRow {
   key: string
-  searchableTitle: string
-  searchableDescription: string
-  secondaryText: string
+  title: string
 }
 
 type SearchWorkerRequest =
@@ -43,13 +39,11 @@ self.onmessage = (message: MessageEvent<SearchWorkerRequest>) => {
   if (message.data.type === 'init') {
     const rows: SearchRow[] = message.data.entries.map((entry) => ({
       key: entry.key,
-      searchableTitle: entry.title ?? '',
-      searchableDescription: entry.description ?? '',
-      secondaryText: entry.secondaryText ?? '',
+      title: entry.title ?? '',
     }))
 
     searchIndex = new Fuse(rows, {
-      keys: ['key', 'searchableTitle', 'searchableDescription', 'secondaryText'],
+      keys: ['key', 'title'],
       threshold: 0.32,
       includeScore: true,
       ignoreLocation: true,

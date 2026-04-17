@@ -1,8 +1,9 @@
 const EVENT_QUERY_KEY = 'event'
 const FOCUS_QUERY_KEY = 'focus'
+const DECISION_QUERY_KEY = 'decision'
 
 export interface DocSelectionFromQuery {
-  kind: 'event' | 'focus'
+  kind: 'event' | 'focus' | 'decision'
   id: string
 }
 
@@ -14,6 +15,14 @@ export function readEventFromQuery(search: string): string | null {
 
 export function readSelectionFromQuery(search: string): DocSelectionFromQuery | null {
   const params = new URLSearchParams(search)
+
+  const decisionValue = params.get(DECISION_QUERY_KEY)
+  if (decisionValue?.trim()) {
+    return {
+      kind: 'decision',
+      id: decisionValue,
+    }
+  }
 
   const focusValue = params.get(FOCUS_QUERY_KEY)
   if (focusValue?.trim()) {
@@ -38,6 +47,7 @@ export function writeEventToQuery(search: string, eventId: string): string {
   const params = new URLSearchParams(search)
   params.set(EVENT_QUERY_KEY, eventId)
   params.delete(FOCUS_QUERY_KEY)
+  params.delete(DECISION_QUERY_KEY)
   const query = params.toString()
   return query ? `?${query}` : ''
 }
@@ -45,11 +55,17 @@ export function writeEventToQuery(search: string, eventId: string): string {
 export function writeSelectionToQuery(search: string, selection: DocSelectionFromQuery): string {
   const params = new URLSearchParams(search)
 
-  if (selection.kind === 'focus') {
+  if (selection.kind === 'decision') {
+    params.set(DECISION_QUERY_KEY, selection.id)
+    params.delete(FOCUS_QUERY_KEY)
+    params.delete(EVENT_QUERY_KEY)
+  } else if (selection.kind === 'focus') {
     params.set(FOCUS_QUERY_KEY, selection.id)
+    params.delete(DECISION_QUERY_KEY)
     params.delete(EVENT_QUERY_KEY)
   } else {
     params.set(EVENT_QUERY_KEY, selection.id)
+    params.delete(DECISION_QUERY_KEY)
     params.delete(FOCUS_QUERY_KEY)
   }
 

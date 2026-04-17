@@ -29,6 +29,17 @@ const SKIP_EFFECT_KEYS = new Set([
   'immediate',
 ])
 
+const TREE_SKIP_KEYS = new Set([
+  'title',
+  'desc',
+  'name',
+  'log',
+  'option',
+  'trigger',
+  'ai_chance',
+  'immediate',
+])
+
 const NON_EFFECT_SUBTREE_KEYS = new Set([
   'trigger',
   'limit',
@@ -313,7 +324,7 @@ function buildEffectNode(assignment: ClausewitzAssignment): EventEffectNode {
   }
 
   const children = assignment.value.assignments
-    .filter((childAssignment) => !SKIP_EFFECT_KEYS.has(childAssignment.key))
+    .filter((childAssignment) => !TREE_SKIP_KEYS.has(childAssignment.key))
     .map((childAssignment) => buildEffectNode(childAssignment))
 
   return {
@@ -324,8 +335,30 @@ function buildEffectNode(assignment: ClausewitzAssignment): EventEffectNode {
 
 function buildOptionEffectTree(optionBlock: ClausewitzBlock): EventEffectNode[] {
   return optionBlock.assignments
-    .filter((assignment) => !SKIP_EFFECT_KEYS.has(assignment.key))
+    .filter((assignment) => !TREE_SKIP_KEYS.has(assignment.key))
     .map((assignment) => buildEffectNode(assignment))
+}
+
+function buildEventImmediateEffectTree(eventBlock: ClausewitzBlock): EventEffectNode[] {
+  const nodes: EventEffectNode[] = []
+
+  for (const immediateBlock of getBlockAssignments(eventBlock, 'immediate')) {
+    nodes.push(...buildOptionEffectTree(immediateBlock))
+  }
+
+  for (const assignment of eventBlock.assignments) {
+    if (assignment.key === 'option' || assignment.key === 'immediate' || TREE_SKIP_KEYS.has(assignment.key)) {
+      continue
+    }
+
+    if (assignment.value.kind === 'block' && NON_EFFECT_SUBTREE_KEYS.has(assignment.key)) {
+      continue
+    }
+
+    nodes.push(buildEffectNode(assignment))
+  }
+
+  return nodes
 }
 
 function dedupeReferences(references: EventReference[]): EventReference[] {
@@ -549,6 +582,7 @@ export async function parseEventFile(
       title: titleKey ? localization.get(titleKey) : undefined,
       description: descKey ? localization.get(descKey) : undefined,
       immediateEffects: collectImmediateEffects(eventBlock),
+      immediateEffectTree: buildEventImmediateEffectTree(eventBlock),
       options,
       references,
       incomingEventIds: [],
